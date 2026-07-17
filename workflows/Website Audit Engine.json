@@ -1,0 +1,646 @@
+{
+  "name": "Website Audit Engine",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -272,
+        -192
+      ],
+      "id": "73edfe0c-f64c-4e02-b231-0614f244b839",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "={{$json.audit_url}}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "redirect": {
+            "redirect": {}
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        400,
+        -112
+      ],
+      "id": "0c07791c-f7b4-4c92-a196-b19d4427ced0",
+      "name": "HTTP Request",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        624,
+        -192
+      ],
+      "id": "75d41c29-d14f-4a59-9fd8-087fbbb8646e",
+      "name": "Merge",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n\n  const a = item.json.audit;\n\n  let score = 100;\n  const issues = [];\n\n  if (!a.hasTitle) {\n    score -= 15;\n    issues.push(\"Missing title tag\");\n  }\n\n  if (!a.hasMetaDescription) {\n    score -= 20;\n    issues.push(\"Missing meta description\");\n  }\n\n  if (!a.hasH1) {\n    score -= 10;\n    issues.push(\"Missing H1\");\n  }\n\n  if (!a.hasContactPage) {\n    score -= 15;\n    issues.push(\"No contact page\");\n  }\n\n  if (!a.hasAboutPage) {\n    score -= 10;\n    issues.push(\"No about page\");\n  }\n\n  if (!a.hasPrivacyPolicy) {\n    score -= 10;\n    issues.push(\"No privacy policy\");\n  }\n\n  if (!a.hasSSL) {\n    score -= 20;\n    issues.push(\"Website not using HTTPS\");\n  }\n\n  let priority = \"Low\";\n\n  if (score < 50) {\n    priority = \"High\";\n  } else if (score < 75) {\n    priority = \"Medium\";\n  }\n\n  return {\n    json: {\n      ...item.json,\n\n      opportunity_score: score,\n\n      priority,\n\n      issues\n    }\n  };\n\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        -192
+      ],
+      "id": "ec28d4a7-0416-46fd-bd15-769470ea2c42",
+      "name": "Opportunity Score",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n\n  const html = item.json.data || \"\";\n\n  const audit = {\n    title: null,\n    hasTitle: false,\n\n    hasMetaDescription: false,\n\n    hasH1: false,\n\n    hasContactPage: false,\n\n    hasAboutPage: false,\n\n    hasPrivacyPolicy: false,\n\n    hasSSL: item.json.audit_url.startsWith(\"https\"),\n\n    htmlLength: html.length\n  };\n\n  // Title\n  const title = html.match(/<title>(.*?)<\\/title>/i);\n\n  if (title) {\n    audit.title = title[1];\n    audit.hasTitle = true;\n  }\n\n  // Meta Description\n  audit.hasMetaDescription =\n    /meta\\s+name=[\"']description[\"']/i.test(html);\n\n  // H1\n  audit.hasH1 =\n    /<h1/i.test(html);\n\n  // Contact\n  audit.hasContactPage =\n    /contact/i.test(html);\n\n  // About\n  audit.hasAboutPage =\n    /about/i.test(html);\n\n  // Privacy\n  audit.hasPrivacyPolicy =\n    /privacy/i.test(html);\n\n  return {\n    json: {\n      ...item.json,\n      audit\n    }\n  };\n\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        -192
+      ],
+      "id": "90d0342b-0296-41a9-8501-6918f24a906b",
+      "name": "Website Audit"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  let url = (item.json.website || \"\").trim();\n\n  // Ignore emails\n  if (url.includes(\"@\")) {\n    return {\n      json: {\n        ...item.json,\n        audit_url: null\n      }\n    };\n  }\n\n  // Remove Markdown links\n  const md = url.match(/^\\[([^\\]]+)\\]\\([^)]+\\)$/);\n  if (md) {\n    url = md[1];\n  }\n\n  // Add protocol if missing\n  if (!/^https?:\\/\\//i.test(url)) {\n    url = \"https://\" + url;\n  }\n\n  return {\n    json: {\n      ...item.json,\n      audit_url: url\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        -192
+      ],
+      "id": "de90649d-6107-4e58-a17d-d371c3933629",
+      "name": "Prepare URLs",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    id,\n    business_name,\n    website\nFROM leads\nWHERE website IS NOT NULL\n  AND website <> '';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -48,
+        -192
+      ],
+      "id": "3020a0b9-f9f9-4af2-9440-dd1c0144fe29",
+      "name": "Select Leads",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "9leUdwfg0AJAex9v",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $json;\n\nconst status = lead.statusCode ?? 0;\n\nconst reachable = status >= 200 && status < 400;\n\nconst httpsEnabled = lead.audit_url\n  ? lead.audit_url.startsWith(\"https://\")\n  : false;\n\nlet score = 0;\n\nif (reachable) score += 40;\nif (httpsEnabled) score += 20;\nif (status === 200) score += 40;\n\nlet priority = \"High\";\n\nif (score >= 80) {\n  priority = \"Low\";\n} else if (score >= 60) {\n  priority = \"Medium\";\n}\n\nconst issues = {\n  seo: [],\n  performance: [],\n  security: [],\n  accessibility: []\n};\n\nif (!httpsEnabled) {\n  issues.security.push(\"Website does not use HTTPS\");\n}\n\nif (!reachable) {\n  issues.performance.push(\"Website is unreachable\");\n}\n\nif (status !== 200) {\n  issues.performance.push(`HTTP status ${status}`);\n}\n\nconst recommendations = {\n  immediate: [],\n  future: []\n};\n\nif (!httpsEnabled) {\n  recommendations.immediate.push(\"Enable HTTPS with a valid SSL certificate.\");\n}\n\nif (!reachable) {\n  recommendations.immediate.push(\"Restore website availability.\");\n}\n\nif (status !== 200 && reachable) {\n  recommendations.future.push(\"Investigate non-200 HTTP responses.\");\n}\n\nreturn {\n  json: {\n    ...lead,\n\n    reachable,\n    status_code: status,\n    https_enabled: httpsEnabled,\n    redirect_url: null,\n    response_time_ms: null,\n    checked_at: new Date().toISOString(),\n\n    audit_score: score,\n    priority,\n\n    issues,\n    recommendations\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        -192
+      ],
+      "id": "a33fe8f4-04a4-4416-af45-6ed243b402b4",
+      "name": "Website Audit1",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "website_audits",
+          "mode": "list",
+          "cachedResultName": "website_audits"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "https_enabled": "={{$json.https_enabled}}",
+            "reachable": "={{$json.reachable}}",
+            "status_code": "={{$json.status_code}}",
+            "response_time_ms": "={{$json.response_time_ms}}",
+            "audit_score": "={{$json.audit_score}}",
+            "seo_score": 0,
+            "performance_score": 0,
+            "accessibility_score": 0,
+            "security_score": 0,
+            "lead_id": "={{$json.id}}",
+            "url": "={{$json.audit_url}}",
+            "redirect_url": "={{$json.redirect_url}}",
+            "checked_at": "={{$json.checked_at}}",
+            "priority": "={{$json.priority}}",
+            "audit_summary": "Initial automated audit",
+            "issues": "={{$json.issues}}",
+            "recommendations": "={{$json.recommendations}}",
+            "raw_response": "={{$json}}",
+            "audited_by": "growth-os-v1"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status_code",
+              "displayName": "status_code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "response_time_ms",
+              "displayName": "response_time_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "https_enabled",
+              "displayName": "https_enabled",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reachable",
+              "displayName": "reachable",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "redirect_url",
+              "displayName": "redirect_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "checked_at",
+              "displayName": "checked_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "audit_score",
+              "displayName": "audit_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "seo_score",
+              "displayName": "seo_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "performance_score",
+              "displayName": "performance_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "accessibility_score",
+              "displayName": "accessibility_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "security_score",
+              "displayName": "security_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "audit_summary",
+              "displayName": "audit_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "issues",
+              "displayName": "issues",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recommendations",
+              "displayName": "recommendations",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "raw_response",
+              "displayName": "raw_response",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "audited_by",
+              "displayName": "audited_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1520,
+        -192
+      ],
+      "id": "8408b244-f7c4-4b36-ab3e-af8ff99ac012",
+      "name": "Insert rows in a table",
+      "retryOnFail": false,
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "9leUdwfg0AJAex9v",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an elite Growth Consultant, Technical SEO Auditor, Conversion Rate Optimization (CRO) Expert, and Digital Marketing Strategist.\n\nYour job is to analyze a company's website and identify business opportunities.\n\nUse ONLY the information provided below.\nNever invent facts.\nIf something cannot be determined, return \"Unknown\".\n\n## Business Information\n\nBusiness Name:\n{{$json.business_name}}\n\nWebsite:\n{{$json.website}}\n\nWebsite Title:\n{{$json.extracted_content.title}}\n\nMeta Description:\n{{$json.extracted_content.meta_description}}\n\nMain Heading (H1):\n{{JSON.stringify($json.extracted_content.h1)}}\n\nSecondary Headings (H2):\n{{JSON.stringify($json.extracted_content.h2)}}\n\nVisible Website Content:\n{{$json.extracted_content.body_text}}\n\nTechnical Audit\n\nHTTP Status:\n{{$json.status_code}}\n\nHTTPS Enabled:\n{{$json.https_enabled}}\n\nAudit Score:\n{{$json.audit_score}}\n\nDetected Technical Issues:\n{{JSON.stringify($json.issues)}}\n\nCurrent Recommendations:\n{{JSON.stringify($json.recommendations)}}\n\n---\n\nAnalyze the website and determine:\n\n1. What does this business do?\n2. Which industry does it belong to?\n3. Who is the likely target customer?\n4. What are the biggest weaknesses of the website?\n5. What SEO improvements are needed?\n6. What conversion improvements are needed?\n7. What content improvements are needed?\n8. What marketing services could Growth OS sell this company?\n9. How valuable is this lead?\n10. How confident are you in your analysis?\n\nReturn ONLY a valid JSON object.\n\nDo NOT use markdown.\nDo NOT use triple backticks.\nDo NOT include explanations.\n\n{\n  \"business_summary\": \"\",\n  \"industry\": \"\",\n  \"target_customer\": \"\",\n  \"website_quality\": 0,\n  \"lead_quality\": 0,\n  \"pain_points\": [],\n  \"seo_findings\": [],\n  \"conversion_findings\": [],\n  \"content_findings\": [],\n  \"growth_opportunities\": [],\n  \"marketing_services\": [],\n  \"marketing_angles\": [],\n  \"priority\": \"\",\n  \"confidence_score\": 0\n}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2240,
+        -192
+      ],
+      "id": "a47af336-7413-4616-8ddf-3757d5e99f5c",
+      "name": "Basic LLM Chain",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        2240,
+        -32
+      ],
+      "id": "7e2c6bda-2b4e-4ebf-a8f2-04697431e557",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "g0iR5w1XqwP1opIH",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $json.data || \"\";\n\nfunction extract(regex) {\n  const match = html.match(regex);\n  return match ? match[1].replace(/\\s+/g, \" \").trim() : \"\";\n}\n\nconst title = extract(/<title[^>]*>([\\s\\S]*?)<\\/title>/i);\n\nconst metaDescription = extract(\n  /<meta[^>]*name=[\"']description[\"'][^>]*content=[\"']([^\"]*)[\"']/i\n);\n\nconst h1 = [...html.matchAll(/<h1[^>]*>([\\s\\S]*?)<\\/h1>/gi)]\n  .map(m => m[1].replace(/<[^>]+>/g, \"\").trim());\n\nconst h2 = [...html.matchAll(/<h2[^>]*>([\\s\\S]*?)<\\/h2>/gi)]\n  .map(m => m[1].replace(/<[^>]+>/g, \"\").trim());\n\nconst bodyText = html\n  .replace(/<script[\\s\\S]*?<\\/script>/gi, \"\")\n  .replace(/<style[\\s\\S]*?<\\/style>/gi, \"\")\n  .replace(/<[^>]+>/g, \" \")\n  .replace(/\\s+/g, \" \")\n  .trim()\n  .substring(0, 5000);\n\nreturn {\n  json: {\n    ...$json,\n    extracted_content: {\n      title,\n      meta_description: metaDescription,\n      h1,\n      h2,\n      body_text: bodyText\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        -192
+      ],
+      "id": "44bbb186-9d3e-465e-9240-4bcd35c9642c",
+      "name": "Code in JavaScript",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://browserless:3000/content?token=growth-os",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n{\n  url: $json.url,\n  gotoOptions: {\n    waitUntil: \"networkidle2\",\n    timeout: 30000\n  }\n}\n}}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2048,
+        -192
+      ],
+      "id": "3e775090-260b-498a-93f5-446d4853cd30",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    url: $json.url,\n    audit_url: $json.audit_url,\n    website: $json.website\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1936,
+        -192
+      ],
+      "id": "1ad9500c-ccb5-4e6c-9a47-9c2b98be2908",
+      "name": "Code in JavaScript1",
+      "alwaysOutputData": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Select Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Website Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Website Audit": {
+      "main": [
+        [
+          {
+            "node": "Opportunity Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare URLs": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Leads": {
+      "main": [
+        [
+          {
+            "node": "Prepare URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Opportunity Score": {
+      "main": [
+        [
+          {
+            "node": "Website Audit1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Website Audit1": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert rows in a table": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "fce08463-480b-4d25-b2a6-9728b88d70a9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "de0269e4b968c7d3ae2712a15271ad59e366290ce48cd9a880360e033464c575"
+  },
+  "nodeGroups": [],
+  "id": "loKJVYBGYd27UKvj",
+  "tags": []
+}
