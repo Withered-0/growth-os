@@ -1,0 +1,1045 @@
+{
+  "name": "Website Audit Engine",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -656,
+        64
+      ],
+      "id": "73edfe0c-f64c-4e02-b231-0614f244b839",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "={{$json.audit_url}}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "redirect": {
+            "redirect": {}
+          },
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "html"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        240,
+        64
+      ],
+      "id": "0c07791c-f7b4-4c92-a196-b19d4427ced0",
+      "name": "HTTP Request",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let website = ($json.website || \"\").trim();\n\n// Remove spaces\nwebsite = website.replace(/\\s+/g, \"\");\n\n// Add protocol if missing\nif (!/^https?:\\/\\//i.test(website)) {\n  website = \"https://\" + website;\n}\n\n// Remove trailing slash\nwebsite = website.replace(/\\/+$/, \"\");\n\nreturn {\n  json: {\n    ...$json,\n    audit_url: website\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        64
+      ],
+      "id": "de90649d-6107-4e58-a17d-d371c3933629",
+      "name": "Prepare URLs",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d67686bc-0a1c-4428-aecb-284812886a86",
+              "name": "run_id",
+              "value": "=={{$now.toMillis()}}",
+              "type": "string"
+            },
+            {
+              "id": "e9cbac02-3b18-4fee-bc59-449131738947",
+              "name": "run_mode",
+              "value": "development",
+              "type": "string"
+            },
+            {
+              "id": "c30ccca6-676a-4da1-9a1f-6ce817d381d8",
+              "name": "batch_size",
+              "value": "10",
+              "type": "string"
+            },
+            {
+              "id": "336e8c32-3d86-4526-a944-0f695c0f5124",
+              "name": "max_retries",
+              "value": "2",
+              "type": "string"
+            },
+            {
+              "id": "5a1e1d8d-6d37-45b1-bd40-cb0210901368",
+              "name": "request_timeout",
+              "value": "15000",
+              "type": "string"
+            },
+            {
+              "id": "745ea636-0b28-4023-91e5-efe7a3a0c22c",
+              "name": "audit_version",
+              "value": "1.0.0",
+              "type": "string"
+            },
+            {
+              "id": "3d3e4c19-ff0d-4908-92e9-e99305bf467d",
+              "name": "use_browserless",
+              "value": "false",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -432,
+        64
+      ],
+      "id": "8e8e4ced-1b23-4bdc-826a-1352e7cb21ee",
+      "name": "Workflow Config",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    l.id,\n    l.business_name,\n    l.website\nFROM leads l\nLEFT JOIN website_audits wa\n    ON wa.lead_id = l.id\nWHERE\n    l.website IS NOT NULL\n    AND l.website <> ''\n    AND wa.id IS NULL\nORDER BY l.created_at ASC\nLIMIT 10;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -208,
+        64
+      ],
+      "id": "3020a0b9-f9f9-4af2-9440-dd1c0144fe29",
+      "name": "Load Leads",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "9leUdwfg0AJAex9v",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.html || \"\";\n\n// -------------------------\n// Helpers\n// -------------------------\n\nfunction match(regex) {\n\tconst m = html.match(regex);\n\treturn m ? m[1].trim() : \"\";\n}\n\nfunction count(regex) {\n\treturn (html.match(regex) || []).length;\n}\n\n// -------------------------\n// Basic SEO\n// -------------------------\n\nconst title = match(/<title[^>]*>(.*?)<\\/title>/is);\n\nconst description = match(\n\t/<meta[^>]*name=[\"']description[\"'][^>]*content=[\"']([^\"]*)[\"']/i\n);\n\nconst language = match(/<html[^>]*lang=[\"']([^\"]+)[\"']/i);\n\nconst canonical = /rel=[\"']canonical[\"']/i.test(html);\n\nconst robots = /name=[\"']robots[\"']/i.test(html);\n\n// -------------------------\n// Headings\n// -------------------------\n\nconst h1 = count(/<h1\\b/gi);\nconst h2 = count(/<h2\\b/gi);\nconst h3 = count(/<h3\\b/gi);\n\n// -------------------------\n// Open Graph\n// -------------------------\n\nconst ogTitle =\n/property=[\"']og:title[\"']/i.test(html);\n\nconst ogDescription =\n/property=[\"']og:description[\"']/i.test(html);\n\nconst ogImage =\n/property=[\"']og:image[\"']/i.test(html);\n\n// -------------------------\n// Twitter\n// -------------------------\n\nconst twitterCard =\n/name=[\"']twitter:card[\"']/i.test(html);\n\nconst twitterTitle =\n/name=[\"']twitter:title[\"']/i.test(html);\n\nconst twitterDescription =\n/name=[\"']twitter:description[\"']/i.test(html);\n\n// -------------------------\n// Structured Data\n// -------------------------\n\nconst schema =\n/application\\/ld\\+json/i.test(html);\n\nconst organizationSchema =\n/\"@type\"\\s*:\\s*\"Organization\"/i.test(html);\n\nconst localBusinessSchema =\n/\"@type\"\\s*:\\s*\"LocalBusiness\"/i.test(html);\n\nconst faqSchema =\n/\"@type\"\\s*:\\s*\"FAQPage\"/i.test(html);\n\nconst breadcrumbSchema =\n/\"@type\"\\s*:\\s*\"BreadcrumbList\"/i.test(html);\n\n// -------------------------\n// Images\n// -------------------------\n\nconst totalImages = count(/<img\\b/gi);\n\nconst imagesWithAlt = count(\n/<img[^>]*alt=[\"'][^\"']*[\"']/gi\n);\n\nconst imagesMissingAlt =\nMath.max(totalImages - imagesWithAlt,0);\n\n// -------------------------\n// Crawlability\n// -------------------------\n\nconst favicon =\n/rel=[\"']icon[\"']/i.test(html) ||\n/rel=[\"']shortcut icon[\"']/i.test(html);\n\n// -------------------------\n// Score\n// -------------------------\n\nlet score = 100;\n\nconst strengths = [];\nconst opportunities = [];\n\n// Title\n\nif(!title){\nscore -= 10;\nopportunities.push(\"Missing title tag\");\n}else{\n\nif(title.length < 30){\nscore -= 4;\nopportunities.push(\"Title too short\");\n}\n\nif(title.length > 60){\nscore -= 4;\nopportunities.push(\"Title too long\");\n}else{\nstrengths.push(\"Optimized page title\");\n}\n\n}\n\n// Description\n\nif(!description){\nscore -= 10;\nopportunities.push(\"Missing meta description\");\n}else{\n\nif(description.length < 120){\nscore -= 3;\nopportunities.push(\"Meta description too short\");\n}\n\nif(description.length > 160){\nscore -= 3;\nopportunities.push(\"Meta description too long\");\n}\n\n}\n\n// H1\n\nif(h1===0){\nscore -= 10;\nopportunities.push(\"Missing H1\");\n}\n\nif(h1===1){\nstrengths.push(\"Single H1 detected\");\n}\n\nif(h1>1){\nscore -= 5;\nopportunities.push(\"Multiple H1 headings\");\n}\n\n// Language\n\nif(language){\nstrengths.push(\"Language attribute present\");\n}else{\nscore -= 3;\nopportunities.push(\"Missing language attribute\");\n}\n\n// Canonical\n\nif(canonical){\nstrengths.push(\"Canonical URL present\");\n}else{\nscore -= 5;\nopportunities.push(\"Missing canonical URL\");\n}\n\n// Robots\n\nif(robots){\nstrengths.push(\"Robots meta configured\");\n}else{\nscore -= 3;\nopportunities.push(\"Missing robots meta\");\n}\n\n// Open Graph\n\nif(ogTitle && ogDescription && ogImage){\nstrengths.push(\"Open Graph configured\");\n}else{\nscore -= 3;\nopportunities.push(\"Incomplete Open Graph tags\");\n}\n\n// Twitter\n\nif(twitterCard){\nstrengths.push(\"Twitter Card detected\");\n}else{\nscore -= 2;\nopportunities.push(\"Missing Twitter Card\");\n}\n\n// Schema\n\nif(schema){\nstrengths.push(\"Structured data detected\");\n}else{\nscore -= 5;\nopportunities.push(\"No structured data detected\");\n}\n\n// Image Alt\n\nif(totalImages>0){\n\nif(imagesMissingAlt===0){\n\nstrengths.push(\"All images include alt text\");\n\n}else{\n\nscore -= Math.min(imagesMissingAlt,5);\n\nopportunities.push(\n`${imagesMissingAlt} image(s) missing alt text`\n);\n\n}\n\n}\n\n// Favicon\n\nif(favicon){\nstrengths.push(\"Favicon detected\");\n}else{\nscore -= 2;\nopportunities.push(\"Missing favicon\");\n}\n\nscore = Math.max(0,Math.round(score));\n\n// -------------------------\n// Output\n// -------------------------\n\nreturn [{\njson:{\n\nseo:{\n\nscore,\n\nmetrics:{\n\ntitleLength:title.length,\n\ndescriptionLength:description.length,\n\nlanguage,\n\nh1,\n\nh2,\n\nh3,\n\ncanonical,\n\nrobots,\n\nopenGraph:{\ntitle:ogTitle,\ndescription:ogDescription,\nimage:ogImage\n},\n\ntwitter:{\ncard:twitterCard,\ntitle:twitterTitle,\ndescription:twitterDescription\n},\n\nschema:{\npresent:schema,\norganization:organizationSchema,\nlocalBusiness:localBusinessSchema,\nfaq:faqSchema,\nbreadcrumb:breadcrumbSchema\n},\n\nimages:{\ntotal:totalImages,\nwithAlt:imagesWithAlt,\nmissingAlt:imagesMissingAlt\n},\n\nfavicon\n\n},\n\ntitle,\n\ndescription,\n\nstrengths,\n\nopportunities\n\n}\n\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -800
+      ],
+      "id": "ba27693d-84f2-4eea-84e4-cd94a13bff5f",
+      "name": "SEO Audit Node",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.html || \"\";\n\n// ----------------------\n// Helper\n// ----------------------\n\nfunction count(regex){\n    return (html.match(regex)||[]).length;\n}\n\n// ----------------------\n// Counts\n// ----------------------\n\nconst images = count(/<img\\b/gi);\nconst lazyImages = count(/loading=[\"']lazy[\"']/gi);\n\nconst buttons = count(/<button\\b/gi);\n\nconst links = count(/<a\\b/gi);\n\nconst externalLinks =\ncount(/<a[^>]*href=[\"']https?:\\/\\//gi);\n\nconst forms = count(/<form\\b/gi);\n\nconst inputs = count(/<input\\b/gi);\n\n// ----------------------\n// Navigation\n// ----------------------\n\nconst navigation =\n/<nav\\b/i.test(html);\n\nconst footer =\n/<footer\\b/i.test(html);\n\nconst header =\n/<header\\b/i.test(html);\n\n// ----------------------\n// Hero Section\n// ----------------------\n\nconst hero =\n/hero/i.test(html) ||\n/banner/i.test(html);\n\n// ----------------------\n// Search\n// ----------------------\n\nconst search =\n/type=[\"']search[\"']/i.test(html);\n\n// ----------------------\n// Mobile Menu\n// ----------------------\n\nconst mobileMenu =\n/hamburger/i.test(html) ||\n/mobile-menu/i.test(html) ||\n/menu-toggle/i.test(html);\n\n// ----------------------\n// CTA Detection\n// ----------------------\n\nconst ctaWords = [\n\"start\",\n\"book\",\n\"join\",\n\"contact\",\n\"buy\",\n\"subscribe\",\n\"trial\",\n\"apply\",\n\"consultation\",\n\"call\"\n];\n\nlet ctaCount = 0;\n\nctaWords.forEach(word=>{\n    const regex = new RegExp(word,\"gi\");\n    ctaCount += count(regex);\n});\n\n// ----------------------\n// Score\n// ----------------------\n\nlet score = 100;\n\nconst strengths=[];\n\nconst opportunities=[];\n\n// Navigation\n\nif(navigation){\n\nstrengths.push(\"Navigation detected\");\n\n}else{\n\nscore-=10;\n\nopportunities.push(\"Navigation missing\");\n\n}\n\n// Header\n\nif(header){\n\nstrengths.push(\"Header detected\");\n\n}else{\n\nscore-=5;\n\nopportunities.push(\"Header missing\");\n\n}\n\n// Footer\n\nif(footer){\n\nstrengths.push(\"Footer detected\");\n\n}else{\n\nscore-=5;\n\nopportunities.push(\"Footer missing\");\n\n}\n\n// Hero\n\nif(hero){\n\nstrengths.push(\"Hero section detected\");\n\n}else{\n\nscore-=5;\n\nopportunities.push(\"Hero section not detected\");\n\n}\n\n// Forms\n\nif(forms===0){\n\nscore-=10;\n\nopportunities.push(\"No contact form\");\n\n}else{\n\nstrengths.push(\"Contact form detected\");\n\n}\n\n// Buttons\n\nif(buttons<2){\n\nscore-=5;\n\nopportunities.push(\"Very few buttons\");\n\n}\n\n// CTA\n\nif(ctaCount<3){\n\nscore-=5;\n\nopportunities.push(\"Weak call-to-action visibility\");\n\n}else{\n\nstrengths.push(\"Multiple CTAs detected\");\n\n}\n\n// Images\n\nif(images>0){\n\nif(lazyImages<images){\n\nscore-=5;\n\nopportunities.push(\"Images are not fully lazy-loaded\");\n\n}else{\n\nstrengths.push(\"Images use lazy loading\");\n\n}\n\n}\n\n// Search\n\nif(search){\n\nstrengths.push(\"Search functionality detected\");\n\n}\n\n// Mobile Menu\n\nif(mobileMenu){\n\nstrengths.push(\"Mobile navigation detected\");\n\n}\n\n// ----------------------\n// Return\n// ----------------------\n\nscore=Math.max(0,Math.round(score));\n\nreturn [{\n\njson:{\n\nux:{\n\nscore,\n\nmetrics:{\n\nimages,\n\nlazyImages,\n\nbuttons,\n\nlinks,\n\nexternalLinks,\n\nforms,\n\ninputs,\n\nnavigation,\n\nheader,\n\nfooter,\n\nhero,\n\nsearch,\n\nmobileMenu,\n\nctaCount\n\n},\n\nstrengths,\n\nopportunities\n\n}\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -608
+      ],
+      "id": "b4660d6c-9919-4a58-86d6-f627ee0a1718",
+      "name": "UX Audit Node"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.html || \"\";\n\n// ----------------------\n// Helpers\n// ----------------------\n\nfunction count(regex){\n    return (html.match(regex)||[]).length;\n}\n\nfunction exists(regex){\n    return regex.test(html);\n}\n\n// ----------------------\n// CTA Detection\n// ----------------------\n\nconst ctaWords = [\n\"book\",\n\"contact\",\n\"join\",\n\"apply\",\n\"start\",\n\"buy\",\n\"subscribe\",\n\"register\",\n\"call\",\n\"consultation\",\n\"demo\",\n\"trial\",\n\"download\",\n\"quote\",\n\"schedule\"\n];\n\nconst ctas = [];\n\nctaWords.forEach(word=>{\n    if(exists(new RegExp(word,\"i\"))){\n        ctas.push(word);\n    }\n});\n\nconst ctaCount = ctas.length;\n\n// ----------------------\n// Lead Generation\n// ----------------------\n\nconst contactForm = exists(/<form/i);\n\nconst newsletter =\nexists(/newsletter/i) ||\nexists(/subscribe/i);\n\nconst emailCapture =\nexists(/email/i) &&\nexists(/type=[\"']email[\"']/i);\n\nconst whatsapp =\nexists(/wa\\.me/i) ||\nexists(/whatsapp/i);\n\nconst calendly =\nexists(/calendly/i);\n\nconst liveChat =\nexists(/intercom/i) ||\nexists(/tawk/i) ||\nexists(/drift/i) ||\nexists(/livechat/i);\n\n// ----------------------\n// Trust\n// ----------------------\n\nconst testimonials =\nexists(/testimonial/i) ||\nexists(/review/i);\n\nconst clientLogos =\nexists(/client/i) ||\nexists(/trusted by/i);\n\nconst caseStudies =\nexists(/case study/i);\n\nconst guarantee =\nexists(/guarantee/i) ||\nexists(/money back/i);\n\n// ----------------------\n// Sales\n// ----------------------\n\nconst pricing =\nexists(/pricing/i) ||\nexists(/price/i);\n\nconst faq =\nexists(/faq/i) ||\nexists(/frequently asked/i);\n\nconst checkout =\nexists(/checkout/i);\n\nconst ecommerce =\nexists(/cart/i) ||\nexists(/add to cart/i);\n\n// ----------------------\n// Score\n// ----------------------\n\nlet score = 100;\n\nconst strengths = [];\n\nconst opportunities = [];\n\n// CTA\n\nif(ctaCount >= 5){\n\nstrengths.push(\"Strong CTA coverage\");\n\n}else{\n\nscore -= 8;\n\nopportunities.push(\"Increase CTA visibility\");\n\n}\n\n// Contact Form\n\nif(contactForm){\n\nstrengths.push(\"Contact form detected\");\n\n}else{\n\nscore -= 12;\n\nopportunities.push(\"No contact form\");\n\n}\n\n// Newsletter\n\nif(newsletter || emailCapture){\n\nstrengths.push(\"Email capture available\");\n\n}else{\n\nscore -= 8;\n\nopportunities.push(\"No email capture\");\n\n}\n\n// WhatsApp\n\nif(whatsapp){\n\nstrengths.push(\"WhatsApp contact available\");\n\n}\n\n// Testimonials\n\nif(testimonials){\n\nstrengths.push(\"Testimonials detected\");\n\n}else{\n\nscore -= 8;\n\nopportunities.push(\"No testimonials\");\n\n}\n\n// Client Logos\n\nif(clientLogos){\n\nstrengths.push(\"Client logos detected\");\n\n}\n\n// Case Studies\n\nif(caseStudies){\n\nstrengths.push(\"Case studies available\");\n\n}\n\n// FAQ\n\nif(faq){\n\nstrengths.push(\"FAQ section detected\");\n\n}else{\n\nscore -= 6;\n\nopportunities.push(\"No FAQ section\");\n\n}\n\n// Pricing\n\nif(pricing){\n\nstrengths.push(\"Pricing information available\");\n\n}else{\n\nscore -= 5;\n\nopportunities.push(\"Pricing not detected\");\n\n}\n\n// Calendly\n\nif(calendly){\n\nstrengths.push(\"Appointment booking available\");\n\n}\n\n// Live Chat\n\nif(liveChat){\n\nstrengths.push(\"Live chat detected\");\n\n}\n\n// Guarantee\n\nif(guarantee){\n\nstrengths.push(\"Guarantee messaging found\");\n\n}\n\nscore = Math.max(0, Math.round(score));\n\n// ----------------------\n// Return\n// ----------------------\n\nreturn [{\n\njson:{\n\nconversion:{\n\nscore,\n\nmetrics:{\n\nctaCount,\n\nctas,\n\ncontactForm,\n\nnewsletter,\n\nemailCapture,\n\nwhatsapp,\n\ncalendly,\n\nliveChat,\n\ntestimonials,\n\nclientLogos,\n\ncaseStudies,\n\nguarantee,\n\npricing,\n\nfaq,\n\ncheckout,\n\necommerce\n\n},\n\nstrengths,\n\nopportunities\n\n}\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -416
+      ],
+      "id": "6fc0a8ac-0998-44c3-9209-ebbe2a990c6e",
+      "name": "Conversion Audit Node",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 10,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        688,
+        -64
+      ],
+      "id": "26b48b76-8b4d-4cc8-b404-ae3b63611173",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst scores = [\n  audit.seo?.score,\n  audit.ux?.score,\n  audit.conversion?.score,\n  audit.tech?.score,\n].filter(score => typeof score === \"number\");\n\nif (scores.length === 0) {\n  throw new Error(\"No audit scores found.\");\n}\n\nconst overall = Math.round(\n  scores.reduce((a, b) => a + b, 0) / scores.length\n);\n\nlet grade = \"\";\nlet status = \"\";\n\nif (overall >= 95) {\n  grade = \"A+\";\n  status = \"Excellent\";\n} else if (overall >= 90) {\n  grade = \"A\";\n  status = \"Outstanding\";\n} else if (overall >= 80) {\n  grade = \"B\";\n  status = \"Good\";\n} else if (overall >= 70) {\n  grade = \"C\";\n  status = \"Needs Improvement\";\n} else if (overall >= 60) {\n  grade = \"D\";\n  status = \"Poor\";\n} else {\n  grade = \"F\";\n  status = \"Critical\";\n}\n\nconst issueCount = audit.opportunities?.length || 0;\n\nlet estimatedScore = Math.min(\n  100,\n  Math.round(overall + issueCount * 1.5)\n);\n\nreturn [{\n  json: {\n    ...audit,\n    overall,\n    grade,\n    status,\n    estimatedScore,\n    improvementPotential: estimatedScore - overall\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        64
+      ],
+      "id": "90d0342b-0296-41a9-8501-6918f24a906b",
+      "name": "Overall Audit",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.html || \"\";\n\n// --------------------\n// Helpers\n// --------------------\n\nfunction count(regex){\n    return (html.match(regex) || []).length;\n}\n\nfunction exists(regex){\n    return regex.test(html);\n}\n\n// --------------------\n// HTML Language\n// --------------------\n\nconst language =\nexists(/<html[^>]*lang=/i);\n\n// --------------------\n// Images\n// --------------------\n\nconst images =\ncount(/<img\\b/gi);\n\nconst altImages =\ncount(/<img[^>]*alt=[\"'][^\"']*[\"']/gi);\n\nconst missingAlt =\nMath.max(images-altImages,0);\n\n// --------------------\n// Forms\n// --------------------\n\nconst inputs =\ncount(/<input\\b/gi);\n\nconst labels =\ncount(/<label\\b/gi);\n\nconst emailInputs =\ncount(/type=[\"']email[\"']/gi);\n\nconst passwordInputs =\ncount(/type=[\"']password[\"']/gi);\n\n// --------------------\n// Buttons\n// --------------------\n\nconst buttons =\ncount(/<button\\b/gi);\n\nconst ariaButtons =\ncount(/<button[^>]*aria-label=/gi);\n\n// --------------------\n// Links\n// --------------------\n\nconst links =\ncount(/<a\\b/gi);\n\nconst emptyLinks =\ncount(/<a[^>]*>\\s*<\\/a>/gi);\n\n// --------------------\n// ARIA\n// --------------------\n\nconst ariaLabels =\ncount(/aria-label=/gi);\n\nconst ariaHidden =\ncount(/aria-hidden=/gi);\n\nconst roleAttributes =\ncount(/role=/gi);\n\n// --------------------\n// Landmarks\n// --------------------\n\nconst nav =\nexists(/<nav/i);\n\nconst header =\nexists(/<header/i);\n\nconst footer =\nexists(/<footer/i);\n\nconst main =\nexists(/<main/i);\n\n// --------------------\n// Skip Link\n// --------------------\n\nconst skipLink =\nexists(/skip to content/i);\n\n// --------------------\n// Tables\n// --------------------\n\nconst tables =\ncount(/<table\\b/gi);\n\nconst tableHeaders =\ncount(/<th\\b/gi);\n\n// --------------------\n// Score\n// --------------------\n\nlet score = 100;\n\nconst strengths = [];\n\nconst opportunities = [];\n\n// Language\n\nif(language){\n\nstrengths.push(\"Language attribute detected\");\n\n}else{\n\nscore-=10;\n\nopportunities.push(\"Missing language attribute\");\n\n}\n\n// Alt Text\n\nif(images>0){\n\nif(missingAlt===0){\n\nstrengths.push(\"All images have alt text\");\n\n}else{\n\nscore-=Math.min(missingAlt,10);\n\nopportunities.push(`${missingAlt} images missing alt text`);\n\n}\n\n}\n\n// Labels\n\nif(inputs>0){\n\nif(labels===0){\n\nscore-=10;\n\nopportunities.push(\"Form inputs have no labels\");\n\n}else{\n\nstrengths.push(\"Form labels detected\");\n\n}\n\n}\n\n// Buttons\n\nif(buttons>ariaButtons){\n\nopportunities.push(\"Some buttons lack aria-labels\");\n\nscore-=5;\n\n}else if(buttons>0){\n\nstrengths.push(\"Buttons include aria labels\");\n\n}\n\n// Empty Links\n\nif(emptyLinks>0){\n\nscore-=5;\n\nopportunities.push(\"Empty links detected\");\n\n}\n\n// Landmarks\n\nif(nav) strengths.push(\"Navigation landmark detected\");\nelse{\nscore-=3;\nopportunities.push(\"Missing navigation landmark\");\n}\n\nif(main) strengths.push(\"Main landmark detected\");\nelse{\nscore-=5;\nopportunities.push(\"Missing main landmark\");\n}\n\nif(header) strengths.push(\"Header landmark detected\");\n\nif(footer) strengths.push(\"Footer landmark detected\");\n\n// Skip Link\n\nif(skipLink){\n\nstrengths.push(\"Skip navigation link detected\");\n\n}else{\n\nscore-=3;\n\nopportunities.push(\"Missing skip-to-content link\");\n\n}\n\n// Tables\n\nif(tables>0){\n\nif(tableHeaders===0){\n\nscore-=5;\n\nopportunities.push(\"Tables missing headers\");\n\n}else{\n\nstrengths.push(\"Accessible table headers detected\");\n\n}\n\n}\n\n// ARIA\n\nif(ariaLabels>0){\n\nstrengths.push(\"ARIA labels detected\");\n\n}\n\nif(roleAttributes>0){\n\nstrengths.push(\"ARIA roles detected\");\n\n}\n\nscore=Math.max(0,Math.round(score));\n\n// --------------------\n// Return\n// --------------------\n\nreturn [{\n\njson:{\n\naccessibility:{\n\nscore,\n\nmetrics:{\n\nlanguage,\n\nimages,\n\naltImages,\n\nmissingAlt,\n\ninputs,\n\nlabels,\n\nbuttons,\n\nariaButtons,\n\nlinks,\n\nemptyLinks,\n\nariaLabels,\n\nariaHidden,\n\nroleAttributes,\n\nnav,\n\nheader,\n\nfooter,\n\nmain,\n\nskipLink,\n\ntables,\n\ntableHeaders\n\n},\n\nstrengths,\n\nopportunities\n\n}\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -32
+      ],
+      "id": "da81a288-ce6b-4d9b-8f58-98da5341cb97",
+      "name": "Accessibility Audit",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.html || \"\";\n\n// ----------------------\n// Helpers\n// ----------------------\n\nfunction count(regex){\n    return (html.match(regex) || []).length;\n}\n\nfunction exists(regex){\n    return regex.test(html);\n}\n\n// ----------------------\n// Images\n// ----------------------\n\nconst images = count(/<img\\b/gi);\nconst lazyImages = count(/loading=[\"']lazy[\"']/gi);\n\nconst nextImage =\nexists(/_next\\/image/i) ||\nexists(/next\\/image/i);\n\n// ----------------------\n// Scripts\n// ----------------------\n\nconst scripts = count(/<script\\b/gi);\n\nconst asyncScripts = count(/<script[^>]*async/gi);\n\nconst deferScripts = count(/<script[^>]*defer/gi);\n\n// ----------------------\n// Stylesheets\n// ----------------------\n\nconst stylesheets =\ncount(/rel=[\"']stylesheet[\"']/gi);\n\n// ----------------------\n// Fonts\n// ----------------------\n\nconst preloadFonts =\ncount(/rel=[\"']preload[\"'][^>]*as=[\"']font[\"']/gi);\n\nconst googleFonts =\nexists(/fonts\\.googleapis\\.com/i);\n\n// ----------------------\n// Resource Hints\n// ----------------------\n\nconst preload =\ncount(/rel=[\"']preload[\"']/gi);\n\nconst prefetch =\ncount(/rel=[\"']prefetch[\"']/gi);\n\nconst preconnect =\ncount(/rel=[\"']preconnect[\"']/gi);\n\n// ----------------------\n// Compression / Modern Formats\n// ----------------------\n\nconst webp =\nexists(/\\.webp/i);\n\nconst avif =\nexists(/\\.avif/i);\n\n// ----------------------\n// CDN\n// ----------------------\n\nconst cloudinary =\nexists(/cloudinary/i);\n\nconst cloudflare =\nexists(/cloudflare/i);\n\nconst jsdelivr =\nexists(/jsdelivr/i);\n\nconst unpkg =\nexists(/unpkg/i);\n\nconst cdnDetected =\ncloudinary ||\ncloudflare ||\njsdelivr ||\nunpkg;\n\n// ----------------------\n// Score\n// ----------------------\n\nlet score = 100;\n\nconst strengths = [];\n\nconst opportunities = [];\n\n// Lazy Loading\n\nif(images > 0){\n\nif(lazyImages === images){\n\nstrengths.push(\"All images use lazy loading\");\n\n}else{\n\nscore -= 8;\n\nopportunities.push(\"Images are not fully lazy-loaded\");\n\n}\n\n}\n\n// Script Loading\n\nif(asyncScripts + deferScripts >= scripts - 1){\n\nstrengths.push(\"Scripts loaded asynchronously\");\n\n}else{\n\nscore -= 5;\n\nopportunities.push(\"Too many blocking JavaScript files\");\n\n}\n\n// Stylesheets\n\nif(stylesheets > 5){\n\nscore -= 5;\n\nopportunities.push(\"Too many stylesheets\");\n\n}else{\n\nstrengths.push(\"Stylesheet count is reasonable\");\n\n}\n\n// Fonts\n\nif(preloadFonts > 0){\n\nstrengths.push(\"Fonts are preloaded\");\n\n}else{\n\nscore -= 3;\n\nopportunities.push(\"Fonts are not preloaded\");\n\n}\n\nif(googleFonts){\n\nopportunities.push(\"Self-host Google Fonts for better performance\");\n\n}\n\n// Preload\n\nif(preload > 0){\n\nstrengths.push(\"Preload hints detected\");\n\n}\n\n// Prefetch\n\nif(prefetch > 0){\n\nstrengths.push(\"Prefetch hints detected\");\n\n}\n\n// Preconnect\n\nif(preconnect > 0){\n\nstrengths.push(\"Preconnect hints detected\");\n\n}\n\n// Next Image\n\nif(nextImage){\n\nstrengths.push(\"Next.js image optimization detected\");\n\n}\n\n// Modern Images\n\nif(webp || avif){\n\nstrengths.push(\"Modern image formats detected\");\n\n}\n\n// CDN\n\nif(cdnDetected){\n\nstrengths.push(\"CDN detected\");\n\n}else{\n\nscore -= 5;\n\nopportunities.push(\"CDN not detected\");\n\n}\n\nscore = Math.max(0, Math.round(score));\n\n// ----------------------\n// Return\n// ----------------------\n\nreturn [{\n\njson:{\n\nperformance:{\n\nscore,\n\nmetrics:{\n\nimages,\n\nlazyImages,\n\nscripts,\n\nasyncScripts,\n\ndeferScripts,\n\nstylesheets,\n\npreloadFonts,\n\ngoogleFonts,\n\npreload,\n\nprefetch,\n\npreconnect,\n\nnextImage,\n\nwebp,\n\navif,\n\ncdnDetected\n\n},\n\nstrengths,\n\nopportunities\n\n}\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        160
+      ],
+      "id": "1decfe71-7689-439c-9a0e-b630039adfa3",
+      "name": "Performance Audit",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const html=$input.first().json.html.toLowerCase();\n\nconst phone=/phone|tel:/i.test(html);\nconst email=/mailto:|@/i.test(html);\nconst address=/address|location/i.test(html);\nconst privacy=/privacy/i.test(html);\nconst terms=/terms/i.test(html);\n\nlet score=100;\n\nconst opportunities=[];\n\nif(!phone){\nscore-=10;\nopportunities.push(\"Phone number missing\");\n}\n\nif(!email){\nscore-=15;\nopportunities.push(\"Email missing\");\n}\n\nif(!privacy){\nscore-=10;\nopportunities.push(\"Privacy policy missing\");\n}\n\nif(!terms){\nscore-=10;\nopportunities.push(\"Terms page missing\");\n}\n\nreturn [{\njson:{\ntrust:{\nscore,\nphone,\nemail,\naddress,\nprivacy,\nterms,\nopportunities\n}\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        352
+      ],
+      "id": "b1c38063-dd27-468a-bf68-292fbdeb7c11",
+      "name": "Trust Audit"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.html || \"\";\n\n// ----------------------\n// Helpers\n// ----------------------\n\nfunction exists(regex){\n    return regex.test(html);\n}\n\nfunction count(regex){\n    return (html.match(regex)||[]).length;\n}\n\n// ----------------------\n// Logo\n// ----------------------\n\nconst logo =\nexists(/logo/i) ||\nexists(/logo\\.png/i) ||\nexists(/logo\\.svg/i);\n\n// ----------------------\n// Favicon\n// ----------------------\n\nconst favicon =\nexists(/rel=[\"']icon[\"']/i) ||\nexists(/favicon/i);\n\n// ----------------------\n// Brand Name\n// ----------------------\n\nconst titleMatch =\nhtml.match(/<title[^>]*>(.*?)<\\/title>/i);\n\nconst title =\ntitleMatch ? titleMatch[1] : \"\";\n\nconst brandName =\ntitle.split(\"|\")[0].trim();\n\n// ----------------------\n// Social Presence\n// ----------------------\n\nconst linkedin =\nexists(/linkedin\\.com/i);\n\nconst twitter =\nexists(/twitter\\.com/i) ||\nexists(/x\\.com/i);\n\nconst facebook =\nexists(/facebook\\.com/i);\n\nconst instagram =\nexists(/instagram\\.com/i);\n\nconst youtube =\nexists(/youtube\\.com/i);\n\nconst tiktok =\nexists(/tiktok\\.com/i);\n\nconst socials = [\nlinkedin,\ntwitter,\nfacebook,\ninstagram,\nyoutube,\ntiktok\n].filter(Boolean).length;\n\n// ----------------------\n// Contact Information\n// ----------------------\n\nconst phone =\nexists(/\\+?\\d[\\d\\s()-]{7,}/);\n\nconst email =\nexists(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n\nconst address =\nexists(/address/i);\n\n// ----------------------\n// Trust Signals\n// ----------------------\n\nconst testimonials =\nexists(/testimonial/i) ||\nexists(/review/i);\n\nconst partners =\nexists(/partner/i);\n\nconst clients =\nexists(/trusted by/i) ||\nexists(/our clients/i);\n\nconst awards =\nexists(/award/i);\n\nconst certifications =\nexists(/certified/i) ||\nexists(/iso/i);\n\n// ----------------------\n// Messaging\n// ----------------------\n\nconst mission =\nexists(/mission/i);\n\nconst vision =\nexists(/vision/i);\n\nconst values =\nexists(/our values/i);\n\nconst about =\nexists(/about/i);\n\n// ----------------------\n// Brand Consistency\n// ----------------------\n\nconst h1 =\ncount(/<h1\\b/gi);\n\nconst ogTitle =\nexists(/property=[\"']og:title[\"']/i);\n\nconst ogDescription =\nexists(/property=[\"']og:description[\"']/i);\n\nconst twitterCard =\nexists(/twitter:card/i);\n\n// ----------------------\n// Score\n// ----------------------\n\nlet score = 100;\n\nconst strengths = [];\n\nconst opportunities = [];\n\n// Logo\n\nif(logo){\n\nstrengths.push(\"Brand logo detected\");\n\n}else{\n\nscore -= 10;\n\nopportunities.push(\"Logo not detected\");\n\n}\n\n// Favicon\n\nif(favicon){\n\nstrengths.push(\"Favicon detected\");\n\n}else{\n\nscore -= 5;\n\nopportunities.push(\"Missing favicon\");\n\n}\n\n// Socials\n\nif(socials >= 3){\n\nstrengths.push(\"Strong social presence\");\n\n}else{\n\nscore -= 8;\n\nopportunities.push(\"Limited social media presence\");\n\n}\n\n// Contact\n\nif(phone && email){\n\nstrengths.push(\"Business contact information available\");\n\n}else{\n\nscore -= 8;\n\nopportunities.push(\"Incomplete contact information\");\n\n}\n\n// Trust\n\nif(testimonials){\n\nstrengths.push(\"Testimonials detected\");\n\n}else{\n\nscore -= 6;\n\nopportunities.push(\"No testimonials\");\n\n}\n\nif(partners){\n\nstrengths.push(\"Partner section detected\");\n\n}\n\nif(clients){\n\nstrengths.push(\"Client showcase detected\");\n\n}\n\nif(awards){\n\nstrengths.push(\"Awards detected\");\n\n}\n\nif(certifications){\n\nstrengths.push(\"Certifications detected\");\n\n}\n\n// Messaging\n\nif(mission || vision){\n\nstrengths.push(\"Mission or vision present\");\n\n}else{\n\nscore -= 5;\n\nopportunities.push(\"Mission statement missing\");\n\n}\n\nif(about){\n\nstrengths.push(\"About section detected\");\n\n}\n\n// Brand Metadata\n\nif(ogTitle && ogDescription){\n\nstrengths.push(\"Social metadata configured\");\n\n}else{\n\nscore -= 5;\n\nopportunities.push(\"Incomplete Open Graph metadata\");\n\n}\n\nif(!twitterCard){\n\nscore -= 3;\n\nopportunities.push(\"Twitter Card missing\");\n\n}\n\nif(h1 !== 1){\n\nscore -= 5;\n\nopportunities.push(\"Brand messaging hierarchy needs improvement\");\n\n}\n\nscore = Math.max(0, Math.round(score));\n\n// ----------------------\n// Return\n// ----------------------\n\nreturn [{\n\njson:{\n\nbranding:{\n\nscore,\n\nbrandName,\n\nmetrics:{\n\nlogo,\n\nfavicon,\n\nsocialProfiles:socials,\n\nphone,\n\nemail,\n\naddress,\n\ntestimonials,\n\npartners,\n\nclients,\n\nawards,\n\ncertifications,\n\nmission,\n\nvision,\n\nvalues,\n\nabout,\n\nogTitle,\n\nogDescription,\n\ntwitterCard\n\n},\n\nstrengths,\n\nopportunities\n\n}\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        544
+      ],
+      "id": "4b332965-c377-43d3-a610-3c3ffb5a9bef",
+      "name": "Branding Audit",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const recommendationDB = {\n  \"Missing H1\": {\n    category: \"SEO\",\n    priority: \"High\",\n    impact: \"High\",\n    effort: \"Easy\",\n    time: \"5-10 mins\",\n    expectedGain: 5,\n    recommendation:\n      \"Add one descriptive H1 containing your primary keyword.\",\n    why:\n      \"Search engines rely on the H1 to understand the page topic.\",\n    business:\n      \"Can improve rankings, click-through rate and content relevance.\"\n  },\n\n  \"Title too long\": {\n    category: \"SEO\",\n    priority: \"Medium\",\n    impact: \"Medium\",\n    effort: \"Easy\",\n    time: \"2 mins\",\n    expectedGain: 2,\n    recommendation:\n      \"Reduce the title to between 50 and 60 characters.\",\n    why:\n      \"Long titles are truncated in search results.\",\n    business:\n      \"Improves visibility and click-through rate.\"\n  },\n\n  \"Meta description too long\": {\n    category: \"SEO\",\n    priority: \"Medium\",\n    impact: \"Medium\",\n    effort: \"Easy\",\n    time: \"2 mins\",\n    expectedGain: 2,\n    recommendation:\n      \"Shorten the meta description to approximately 155 characters.\",\n    why:\n      \"Long descriptions are cut off in search results.\",\n    business:\n      \"Improves search result appearance.\"\n  },\n\n  \"No contact form\": {\n    category: \"Conversion\",\n    priority: \"High\",\n    impact: \"High\",\n    effort: \"Medium\",\n    time: \"30 mins\",\n    expectedGain: 4,\n    recommendation:\n      \"Add a simple contact form on the homepage or contact page.\",\n    why:\n      \"Visitors need a frictionless way to reach you.\",\n    business:\n      \"Generates more leads.\"\n  },\n\n  \"No testimonials\": {\n    category: \"Trust\",\n    priority: \"Medium\",\n    impact: \"High\",\n    effort: \"Easy\",\n    time: \"20 mins\",\n    expectedGain: 4,\n    recommendation:\n      \"Display customer testimonials or case studies.\",\n    why:\n      \"Social proof increases confidence.\",\n    business:\n      \"Improves conversion rates.\"\n  },\n\n  \"No FAQ section\": {\n    category: \"SEO\",\n    priority: \"Medium\",\n    impact: \"Medium\",\n    effort: \"Easy\",\n    time: \"20 mins\",\n    expectedGain: 3,\n    recommendation:\n      \"Create a frequently asked questions section.\",\n    why:\n      \"Answers objections before users leave.\",\n    business:\n      \"Improves trust and can increase organic traffic.\"\n  },\n\n  \"No email capture\": {\n    category: \"Marketing\",\n    priority: \"Medium\",\n    impact: \"High\",\n    effort: \"Easy\",\n    time: \"15 mins\",\n    expectedGain: 4,\n    recommendation:\n      \"Add a newsletter signup or lead magnet.\",\n    why:\n      \"Allows you to nurture visitors after they leave.\",\n    business:\n      \"Creates long-term marketing opportunities.\"\n  },\n\n  \"Images are not using lazy loading\": {\n    category: \"Performance\",\n    priority: \"Medium\",\n    impact: \"Medium\",\n    effort: \"Easy\",\n    time: \"15 mins\",\n    expectedGain: 3,\n    recommendation:\n      \"Enable lazy loading for below-the-fold images.\",\n    why:\n      \"Improves page speed.\",\n    business:\n      \"Reduces bounce rate.\"\n  },\n\n  \"Analytics not detected\": {\n    category: \"Analytics\",\n    priority: \"Medium\",\n    impact: \"High\",\n    effort: \"Easy\",\n    time: \"10 mins\",\n    expectedGain: 2,\n    recommendation:\n      \"Install Google Analytics 4 or another analytics platform.\",\n    why:\n      \"You can't improve what you don't measure.\",\n    business:\n      \"Provides insight into visitor behavior.\"\n  },\n\n  \"CDN not detected\": {\n    category: \"Performance\",\n    priority: \"Low\",\n    impact: \"Medium\",\n    effort: \"Medium\",\n    time: \"1 hour\",\n    expectedGain: 2,\n    recommendation:\n      \"Use a CDN such as Cloudflare to serve static assets.\",\n    why:\n      \"Reduces latency for visitors.\",\n    business:\n      \"Improves loading speed worldwide.\"\n  }\n};\n// Get audit\nconst audit = $input.first().json;\n\n// Where recommendations will go\nconst recommendations = [];\n\n// Every audit section\nconst sections = [\n  audit.seo,\n  audit.ux,\n  audit.conversion,\n  audit.tech,\n  audit.branding,\n  audit.performance,\n  audit.accessibility,\n  audit.trust,\n  audit.content,\n  audit.security\n];\n\n// Search every opportunity\nsections.forEach(section => {\n\n  if (!section || !section.opportunities) return;\n\n  section.opportunities.forEach(issue => {\n\n    if (recommendationDB[issue]) {\n\n      recommendations.push({\n        issue,\n        ...recommendationDB[issue]\n      });\n\n    } else {\n\n      recommendations.push({\n        issue,\n        category: \"General\",\n        priority: \"Medium\",\n        impact: \"Medium\",\n        effort: \"Unknown\",\n        time: \"Unknown\",\n        expectedGain: 1,\n        recommendation: \"Review and resolve this issue.\",\n        why: \"Improves overall website quality.\",\n        business: \"Better user experience.\"\n      });\n\n    }\n\n  });\n\n});\n\n// Highest priority first\nconst priority = {\n  High:3,\n  Medium:2,\n  Low:1\n};\n\nrecommendations.sort(\n(a,b)=>\n(priority[b.priority]||0)-(priority[a.priority]||0)\n);\n\n// Total estimated gain\nconst totalGain =\nrecommendations.reduce(\n(sum,r)=>sum+r.expectedGain,\n0\n);\n\n// Return data\nreturn [\n{\njson:{\n...audit,\n\nrecommendations,\n\nrecommendationSummary:{\ntotal:recommendations.length,\nestimatedScoreIncrease:totalGain\n}\n\n}\n}\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        64
+      ],
+      "id": "f4c5ee2e-a060-41bb-955e-f377af16c953",
+      "name": "Recommendation Engine Code"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst priorityWeight = {\n  Critical: 4,\n  High: 3,\n  Medium: 2,\n  Low: 1\n};\n\nconst recommendations = [...(audit.recommendations || [])];\n\n// Sort by priority\nrecommendations.sort((a, b) => {\n  return (\n    (priorityWeight[b.priority] || 0) -\n    (priorityWeight[a.priority] || 0)\n  );\n});\n\n// High-priority fixes\nconst priorityFixes = recommendations.filter(r =>\n  [\"Critical\", \"High\"].includes(r.priority)\n);\n\n// Quick wins (easy + high impact)\nconst quickWins = recommendations.filter(r =>\n  r.effort === \"Easy\" &&\n  [\"High\", \"Medium\"].includes(r.impact)\n);\n\n// Statistics\nconst stats = {\n  critical: recommendations.filter(r => r.priority === \"Critical\").length,\n  high: recommendations.filter(r => r.priority === \"High\").length,\n  medium: recommendations.filter(r => r.priority === \"Medium\").length,\n  low: recommendations.filter(r => r.priority === \"Low\").length,\n};\n\nreturn [{\n  json: {\n    ...audit,\n\n    recommendations,\n\n    priorityFixes,\n\n    quickWins,\n\n    recommendationStats: stats\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2672,
+        64
+      ],
+      "id": "0abcf260-05db-48ad-8ad9-44aed1e9bf5c",
+      "name": "Priority Engine",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst ownerMap = {\n    SEO: \"SEO Specialist\",\n    Conversion: \"Marketing Team\",\n    Performance: \"Frontend Developer\",\n    Branding: \"Marketing Team\",\n    Analytics: \"Marketing Team\",\n    Security: \"Backend Developer\",\n    Accessibility: \"Frontend Developer\",\n    Content: \"Content Team\",\n    UX: \"UI/UX Designer\",\n    General: \"Developer\"\n};\n\nconst valueMap = {\n    High: {\n        revenue: \"High\",\n        traffic: \"High\",\n        trust: \"High\"\n    },\n    Medium: {\n        revenue: \"Medium\",\n        traffic: \"Medium\",\n        trust: \"Medium\"\n    },\n    Low: {\n        revenue: \"Low\",\n        traffic: \"Low\",\n        trust: \"Low\"\n    }\n};\n\nconst businessImpact = (audit.recommendations || []).map(rec => {\n\n    const value = valueMap[rec.impact] || valueMap.Low;\n\n    return {\n\n        issue: rec.issue,\n\n        category: rec.category,\n\n        priority: rec.priority,\n\n        owner: ownerMap[rec.category] || \"Developer\",\n\n        implementationTime: rec.time,\n\n        difficulty: rec.effort,\n\n        expectedScoreGain: rec.expectedGain,\n\n        businessImpact: rec.business,\n\n        revenueImpact: value.revenue,\n\n        trafficImpact: value.traffic,\n\n        trustImpact: value.trust\n\n    };\n\n});\n\nreturn [{\njson:{\n...audit,\nbusinessImpact\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2896,
+        64
+      ],
+      "id": "7ef4dedf-fb54-49ff-997a-ce538932d716",
+      "name": "Business Impact Engine",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Website audit data:\n\n{{ JSON.stringify($json, null, 2) }}\n\nGenerate a professional website audit report.",
+        "options": {
+          "systemMessage": "You are a senior website growth consultant.\n\nYou have already received the complete audit.\n\nOnly use:\n\n{{$json.assets}}\n\nWrite a premium website audit report.\n\nStructure:\n\n1. Executive Summary\n\n2. Website Health\n\n3. Biggest Strengths\n\n4. Biggest Weaknesses\n\n5. Priority Fixes\n\n6. Business Impact\n\n7. Benchmark Analysis\n\n8. 90-Day Roadmap\n\n9. Risk Assessment\n\n10. Projected Growth\n\n11. Final Verdict\n\nDo not invent information.\n\nDo not repeat yourself.\n\nWrite like a Big Four consulting report."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        5072,
+        64
+      ],
+      "id": "b4bed816-0a37-4828-a9e6-e9b789fa12f2",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        4528,
+        288
+      ],
+      "id": "676e0f57-8eb3-43f5-b249-59e7bfe4c9ea",
+      "name": "Groq Chat Model1",
+      "credentials": {
+        "groqApi": {
+          "id": "g0iR5w1XqwP1opIH",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const html=$input.first().json.html;\n\nconst tech=[];\n\nif(/_next/i.test(html)) tech.push(\"Next.js\");\nif(/react/i.test(html)) tech.push(\"React\");\nif(/cloudinary/i.test(html)) tech.push(\"Cloudinary\");\nif(/paystack/i.test(html)) tech.push(\"Paystack\");\nif(/schema.org/i.test(html)) tech.push(\"Schema.org\");\nif(/google-analytics|gtag|googletagmanager/i.test(html))\ntech.push(\"Google Analytics\");\n\nlet score=100;\n\nconst opportunities=[];\n\nif(!/google-analytics|gtag|googletagmanager/i.test(html)){\nscore-=5;\nopportunities.push(\"Analytics not detected\");\n}\n\nif(!/cloudflare|cdn/i.test(html)){\nscore-=5;\nopportunities.push(\"CDN not detected\");\n}\n\nreturn [{\njson:{\ntech:{\nscore,\ntechnology:tech,\nopportunities\n}\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -224
+      ],
+      "id": "b1d127b9-f016-4a52-b09e-5805e60ce5f2",
+      "name": "Technical Audit",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.html || \"\";\n\n// --------------------\n// Helpers\n// --------------------\n\nfunction count(regex){\n    return (html.match(regex)||[]).length;\n}\n\nfunction exists(regex){\n    return regex.test(html);\n}\n\n// Remove HTML\n\nconst text = html\n.replace(/<script[\\s\\S]*?<\\/script>/gi,\" \")\n.replace(/<style[\\s\\S]*?<\\/style>/gi,\" \")\n.replace(/<[^>]+>/g,\" \")\n.replace(/\\s+/g,\" \")\n.trim();\n\nconst words = text.length\n? text.split(/\\s+/)\n: [];\n\nconst wordCount = words.length;\n\n// --------------------\n// Headings\n// --------------------\n\nconst h1 = count(/<h1\\b/gi);\nconst h2 = count(/<h2\\b/gi);\nconst h3 = count(/<h3\\b/gi);\n\n// --------------------\n// Paragraphs\n// --------------------\n\nconst paragraphs =\ncount(/<p\\b/gi);\n\n// --------------------\n// Lists\n// --------------------\n\nconst unordered =\ncount(/<ul\\b/gi);\n\nconst ordered =\ncount(/<ol\\b/gi);\n\n// --------------------\n// Readability\n// --------------------\n\nconst avgWordsPerParagraph =\nparagraphs\n? Math.round(wordCount/paragraphs)\n:0;\n\n// --------------------\n// Trust Content\n// --------------------\n\nconst about =\nexists(/about us/i);\n\nconst mission =\nexists(/mission/i);\n\nconst vision =\nexists(/vision/i);\n\nconst privacy =\nexists(/privacy policy/i);\n\nconst terms =\nexists(/terms/i);\n\n// --------------------\n// Blog\n// --------------------\n\nconst blog =\nexists(/blog/i) ||\nexists(/article/i);\n\n// --------------------\n// Contact Info\n// --------------------\n\nconst phone =\nexists(/\\+?\\d[\\d\\s\\-]{7,}/);\n\nconst email =\nexists(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n\nconst address =\nexists(/address/i);\n\n// --------------------\n// Score\n// --------------------\n\nlet score = 100;\n\nconst strengths = [];\n\nconst opportunities = [];\n\n// Word Count\n\nif(wordCount < 300){\n\nscore -= 10;\n\nopportunities.push(\"Thin content\");\n\n}else{\n\nstrengths.push(\"Content depth is good\");\n\n}\n\n// Paragraphs\n\nif(paragraphs < 5){\n\nscore -= 5;\n\nopportunities.push(\"Very little written content\");\n\n}\n\n// Heading Structure\n\nif(h2 < 2){\n\nscore -= 5;\n\nopportunities.push(\"Use more H2 headings\");\n\n}else{\n\nstrengths.push(\"Heading structure looks good\");\n\n}\n\n// Readability\n\nif(avgWordsPerParagraph > 90){\n\nscore -= 5;\n\nopportunities.push(\"Paragraphs are too long\");\n\n}else{\n\nstrengths.push(\"Readable paragraph length\");\n\n}\n\n// Mission\n\nif(mission || vision){\n\nstrengths.push(\"Mission or vision statement detected\");\n\n}else{\n\nscore -= 4;\n\nopportunities.push(\"Mission or vision statement missing\");\n\n}\n\n// About\n\nif(about){\n\nstrengths.push(\"About section detected\");\n\n}\n\n// Privacy\n\nif(!privacy){\n\nscore -= 4;\n\nopportunities.push(\"Privacy policy not detected\");\n\n}\n\n// Terms\n\nif(!terms){\n\nscore -= 2;\n\nopportunities.push(\"Terms page not detected\");\n\n}\n\n// Contact\n\nif(phone && email){\n\nstrengths.push(\"Contact information available\");\n\n}else{\n\nscore -= 5;\n\nopportunities.push(\"Contact information incomplete\");\n\n}\n\n// Blog\n\nif(blog){\n\nstrengths.push(\"Blog or articles detected\");\n\n}\n\nscore = Math.max(0,Math.round(score));\n\n// --------------------\n// Return\n// --------------------\n\nreturn [{\n\njson:{\n\ncontent:{\n\nscore,\n\nmetrics:{\n\nwordCount,\n\nparagraphs,\n\naverageWordsPerParagraph:avgWordsPerParagraph,\n\nh1,\n\nh2,\n\nh3,\n\nunorderedLists:unordered,\n\norderedLists:ordered,\n\nabout,\n\nmission,\n\nvision,\n\nprivacy,\n\nterms,\n\nblog,\n\nphone,\n\nemail,\n\naddress\n\n},\n\nstrengths,\n\nopportunities\n\n}\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        736
+      ],
+      "id": "dd0a3aa0-8553-44f7-91f7-29ddd5a2609f",
+      "name": "Content Audit"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.html || \"\";\n\n// ----------------------\n// Helpers\n// ----------------------\n\nfunction exists(regex){\n    return regex.test(html);\n}\n\nfunction count(regex){\n    return (html.match(regex)||[]).length;\n}\n\n// ----------------------\n// Security Headers\n// ----------------------\n\nconst csp =\nexists(/Content-Security-Policy/i);\n\nconst hsts =\nexists(/Strict-Transport-Security/i);\n\nconst xFrame =\nexists(/X-Frame-Options/i);\n\nconst xContent =\nexists(/X-Content-Type-Options/i);\n\nconst referrerPolicy =\nexists(/Referrer-Policy/i);\n\nconst permissionsPolicy =\nexists(/Permissions-Policy/i);\n\n// ----------------------\n// HTTPS\n// ----------------------\n\nconst https =\nexists(/https:\\/\\//i);\n\n// ----------------------\n// CSRF\n// ----------------------\n\nconst csrf =\nexists(/csrf/i) ||\nexists(/xsrf/i);\n\n// ----------------------\n// CAPTCHA\n// ----------------------\n\nconst captcha =\nexists(/recaptcha/i) ||\nexists(/hcaptcha/i);\n\n// ----------------------\n// Cookies\n// ----------------------\n\nconst cookieBanner =\nexists(/cookie/i) ||\nexists(/consent/i);\n\n// ----------------------\n// External Scripts\n// ----------------------\n\nconst externalScripts =\ncount(/<script[^>]*src=[\"']https?:\\/\\//gi);\n\n// ----------------------\n// Mixed Content\n// ----------------------\n\nconst insecureResources =\ncount(/src=[\"']http:\\/\\//gi) +\ncount(/href=[\"']http:\\/\\//gi);\n\n// ----------------------\n// Score\n// ----------------------\n\nlet score = 100;\n\nconst strengths = [];\n\nconst opportunities = [];\n\n// HTTPS\n\nif(https){\n\nstrengths.push(\"HTTPS resources detected\");\n\n}else{\n\nscore -= 30;\n\nopportunities.push(\"HTTPS not detected\");\n\n}\n\n// CSP\n\nif(csp){\n\nstrengths.push(\"Content Security Policy detected\");\n\n}else{\n\nscore -= 10;\n\nopportunities.push(\"Content Security Policy missing\");\n\n}\n\n// HSTS\n\nif(hsts){\n\nstrengths.push(\"HSTS enabled\");\n\n}else{\n\nscore -= 5;\n\nopportunities.push(\"Strict Transport Security missing\");\n\n}\n\n// X Frame\n\nif(xFrame){\n\nstrengths.push(\"Clickjacking protection detected\");\n\n}else{\n\nscore -= 5;\n\nopportunities.push(\"X-Frame-Options missing\");\n\n}\n\n// X Content\n\nif(xContent){\n\nstrengths.push(\"MIME sniffing protection detected\");\n\n}else{\n\nscore -= 4;\n\nopportunities.push(\"X-Content-Type-Options missing\");\n\n}\n\n// Referrer\n\nif(referrerPolicy){\n\nstrengths.push(\"Referrer Policy configured\");\n\n}else{\n\nscore -= 3;\n\nopportunities.push(\"Referrer Policy missing\");\n\n}\n\n// Permissions\n\nif(permissionsPolicy){\n\nstrengths.push(\"Permissions Policy configured\");\n\n}\n\n// CSRF\n\nif(csrf){\n\nstrengths.push(\"CSRF protection detected\");\n\n}else{\n\nscore -= 5;\n\nopportunities.push(\"CSRF protection not detected\");\n\n}\n\n// CAPTCHA\n\nif(captcha){\n\nstrengths.push(\"Bot protection detected\");\n\n}\n\n// Cookies\n\nif(cookieBanner){\n\nstrengths.push(\"Cookie consent detected\");\n\n}else{\n\nscore -= 2;\n\nopportunities.push(\"Cookie consent banner missing\");\n\n}\n\n// Mixed Content\n\nif(insecureResources>0){\n\nscore -= 10;\n\nopportunities.push(\"Mixed HTTP content detected\");\n\n}\n\n// External JS\n\nif(externalScripts>15){\n\nscore -= 4;\n\nopportunities.push(\"Large number of third-party scripts\");\n\n}\n\nscore = Math.max(0,Math.round(score));\n\n// ----------------------\n// Return\n// ----------------------\n\nreturn [{\n\njson:{\n\nsecurity:{\n\nscore,\n\nmetrics:{\n\nhttps,\n\ncsp,\n\nhsts,\n\nxFrame,\n\nxContent,\n\nreferrerPolicy,\n\npermissionsPolicy,\n\ncsrf,\n\ncaptcha,\n\ncookieBanner,\n\nexternalScripts,\n\ninsecureResources\n\n},\n\nstrengths,\n\nopportunities\n\n}\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        928
+      ],
+      "id": "dbe3679f-c736-4312-8b53-38a915d97f74",
+      "name": "Security Audit"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst industry = {\n\nseo:75,\nux:80,\nconversion:76,\nperformance:85,\nbranding:82,\nsecurity:80,\ncontent:85\n\n};\n\nconst comparison = {};\n\nObject.keys(industry).forEach(key=>{\n\n    if(audit[key]){\n\n        comparison[key]={\n\n            yourScore:audit[key].score,\n\n            industryAverage:industry[key],\n\n            difference:\n                audit[key].score-industry[key],\n\n            status:\n                audit[key].score>=industry[key]\n                ? \"Above Average\"\n                : \"Below Average\"\n\n        };\n\n    }\n\n});\n\nreturn [{\njson:{\n...audit,\nbenchmark:comparison\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        64
+      ],
+      "id": "a83fe85b-a81f-45fe-92f5-2087748bae7a",
+      "name": "Benchmark Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst opportunities = [];\n\n(audit.recommendations || []).forEach(rec=>{\n\n    const roi =\n        (rec.expectedGain || 1) *\n        (rec.priority===\"High\" ? 3 :\n         rec.priority===\"Medium\" ? 2 : 1);\n\n    opportunities.push({\n\n        issue:rec.issue,\n\n        roi,\n\n        effort:rec.effort,\n\n        recommendation:rec.recommendation,\n\n        estimatedGain:rec.expectedGain\n\n    });\n\n});\n\nopportunities.sort((a,b)=>b.roi-a.roi);\n\nreturn [{\njson:{\n...audit,\nopportunitySummary:{\ntopFive:opportunities.slice(0,5),\nopportunities\n}\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3344,
+        64
+      ],
+      "id": "ae8df461-5528-44af-80c9-bf8d543f5533",
+      "name": "Opportunity Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst score = audit.overall || 0;\n\nlet level;\nlet stage;\n\nif(score < 40){\n\n    level=1;\n    stage=\"Foundation\";\n\n}else if(score < 60){\n\n    level=2;\n    stage=\"Growing\";\n\n}else if(score < 80){\n\n    level=3;\n    stage=\"Scaling\";\n\n}else if(score < 90){\n\n    level=4;\n    stage=\"Optimized\";\n\n}else{\n\n    level=5;\n    stage=\"Market Leader\";\n\n}\n\nreturn [{\njson:{\n...audit,\nmaturity:{\nlevel,\nstage,\nscore\n}\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3792,
+        64
+      ],
+      "id": "53756b87-134b-4706-bd90-77a60cf9823a",
+      "name": "Maturity Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst roadmap = {\n    immediate: {\n        title: \"Immediate Actions (0–7 Days)\",\n        scoreGain: 0,\n        estimatedTimeMinutes: 0,\n        fixes: []\n    },\n\n    shortTerm: {\n        title: \"Short-Term Improvements (7–30 Days)\",\n        scoreGain: 0,\n        estimatedTimeMinutes: 0,\n        fixes: []\n    },\n\n    longTerm: {\n        title: \"Long-Term Improvements (30–90 Days)\",\n        scoreGain: 0,\n        estimatedTimeMinutes: 0,\n        fixes: []\n    }\n};\n\nfunction parseMinutes(time){\n\n    if(!time) return 30;\n\n    const t = time.toLowerCase();\n\n    if(t.includes(\"5-10\")) return 10;\n    if(t.includes(\"10\")) return 10;\n    if(t.includes(\"15\")) return 15;\n    if(t.includes(\"20\")) return 20;\n    if(t.includes(\"30\")) return 30;\n    if(t.includes(\"1 hour\")) return 60;\n    if(t.includes(\"2 hour\")) return 120;\n\n    return 30;\n\n}\n\n(audit.roadmap?.topPriority || []).forEach(item=>{\n\n    roadmap.immediate.fixes.push(item);\n\n    roadmap.immediate.scoreGain += item.expectedGain || 0;\n\n    roadmap.immediate.estimatedTimeMinutes += parseMinutes(item.time);\n\n});\n\n(audit.roadmap?.mediumPriority || []).forEach(item=>{\n\n    roadmap.shortTerm.fixes.push(item);\n\n    roadmap.shortTerm.scoreGain += item.expectedGain || 0;\n\n    roadmap.shortTerm.estimatedTimeMinutes += parseMinutes(item.time);\n\n});\n\n(audit.roadmap?.backlog || []).forEach(item=>{\n\n    roadmap.longTerm.fixes.push(item);\n\n    roadmap.longTerm.scoreGain += item.expectedGain || 0;\n\n    roadmap.longTerm.estimatedTimeMinutes += parseMinutes(item.time);\n\n});\n\nconst currentScore = audit.overall || 0;\n\nconst projected = {\n\ncurrent: currentScore,\n\nafterImmediate:\nMath.min(100,\ncurrentScore + roadmap.immediate.scoreGain),\n\nafterShortTerm:\nMath.min(\n100,\ncurrentScore +\nroadmap.immediate.scoreGain +\nroadmap.shortTerm.scoreGain\n),\n\nafterLongTerm:\nMath.min(\n100,\ncurrentScore +\nroadmap.immediate.scoreGain +\nroadmap.shortTerm.scoreGain +\nroadmap.longTerm.scoreGain\n)\n\n};\n\nconst summary = {\n\ntotalFixes:\nroadmap.immediate.fixes.length +\nroadmap.shortTerm.fixes.length +\nroadmap.longTerm.fixes.length,\n\ntotalScoreGain:\nroadmap.immediate.scoreGain +\nroadmap.shortTerm.scoreGain +\nroadmap.longTerm.scoreGain,\n\ntotalImplementationMinutes:\nroadmap.immediate.estimatedTimeMinutes +\nroadmap.shortTerm.estimatedTimeMinutes +\nroadmap.longTerm.estimatedTimeMinutes\n\n};\n\nreturn [{\n\njson:{\n\n...audit,\n\nroadmap90: roadmap,\n\nprojectedScores: projected,\n\nroadmapSummary: summary\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        64
+      ],
+      "id": "5b5c72cd-5cd3-440f-abb3-58107616181b",
+      "name": "Roadmap Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst dashboard={\n\nwebsite:audit.branding?.brandName || \"Unknown\",\n\noverallScore:audit.overall,\n\ngrade:audit.grade,\n\nstatus:audit.status,\n\ntopStrengths:audit.topStrengths || [],\n\ntopFixes:\naudit.roadmap?.topPriority || [],\n\nprojectedScore:\naudit.projectedScores?.afterLongTerm || audit.overall,\n\ntotalRecommendations:\naudit.recommendationSummary?.total || 0,\n\nquickWins:\naudit.quickWins?.length || 0,\n\nhighPriority:\naudit.recommendationStats?.high || 0,\n\nmediumPriority:\naudit.recommendationStats?.medium || 0,\n\nlowPriority:\naudit.recommendationStats?.low || 0,\n\nestimatedImplementationMinutes:\naudit.roadmapSummary?.totalImplementationMinutes || 0,\n\nmaturity:\naudit.maturity,\n\nbenchmark:\naudit.benchmark\n\n};\n\nreturn [{\njson:{\n...audit,\nexecutiveDashboard:dashboard\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4224,
+        64
+      ],
+      "id": "3191bded-0008-49b4-a35d-5d7ce486a82f",
+      "name": "Executive Dashboard"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst riskWeights = {\n    Critical: 5,\n    High: 4,\n    Medium: 3,\n    Low: 2\n};\n\nconst risks = [];\n\n(audit.recommendations || []).forEach(issue=>{\n\n    const score =\n        (riskWeights[issue.priority] || 1) *\n        ((issue.expectedGain || 1));\n\n    risks.push({\n\n        issue: issue.issue,\n\n        priority: issue.priority,\n\n        category: issue.category,\n\n        riskScore: score,\n\n        business: issue.business,\n\n        mitigation: issue.recommendation\n\n    });\n\n});\n\nrisks.sort((a,b)=>b.riskScore-a.riskScore);\n\nreturn [{\njson:{\n...audit,\nriskSummary:{\ntotal:risks.length,\nhighest:risks[0] || null,\nrisks\n}\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3568,
+        64
+      ],
+      "id": "ffb46712-cc3d-4bf9-861f-02cde5a58c23",
+      "name": "Risk Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\n// ----------------------\n// Remove duplicate recommendations\n// ----------------------\n\nconst recommendationMap = new Map();\n\n(audit.recommendations || []).forEach(rec => {\n\n    if (!recommendationMap.has(rec.issue)) {\n        recommendationMap.set(rec.issue, rec);\n    }\n\n});\n\nconst recommendations = [...recommendationMap.values()];\n\n\n// ----------------------\n// Remove duplicate opportunities\n// ----------------------\n\nconst opportunities = [...new Set(audit.opportunities || [])];\n\n\n// ----------------------\n// Remove duplicate strengths\n// ----------------------\n\nfunction unique(arr = []) {\n    return [...new Set(arr)];\n}\n\n[\n\"seo\",\n\"ux\",\n\"conversion\",\n\"branding\",\n\"content\",\n\"performance\",\n\"accessibility\",\n\"security\",\n\"trust\"\n\n].forEach(section=>{\n\n    if(audit[section]){\n\n        audit[section].strengths =\n            unique(audit[section].strengths);\n\n        audit[section].opportunities =\n            unique(audit[section].opportunities);\n\n    }\n\n});\n\n\n// ----------------------\n// Update recommendation stats\n// ----------------------\n\nconst stats = {\n\ncritical:0,\n\nhigh:0,\n\nmedium:0,\n\nlow:0\n\n};\n\nrecommendations.forEach(r=>{\n\n    const p = (r.priority || \"\").toLowerCase();\n\n    if(stats[p] !== undefined){\n\n        stats[p]++;\n\n    }\n\n});\n\n\n// ----------------------\n// Update summary\n// ----------------------\n\nconst recommendationSummary = {\n\ntotal: recommendations.length,\n\nestimatedScoreIncrease:\nrecommendations.reduce(\n(sum,r)=>sum+(r.expectedGain||0),\n0\n)\n\n};\n\n\n// ----------------------\n// Return\n// ----------------------\n\nreturn [{\n\njson:{\n\n...audit,\n\nrecommendations,\n\nopportunities,\n\nrecommendationStats:stats,\n\nrecommendationSummary\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        64
+      ],
+      "id": "06286730-cfef-4a14-b441-280da867093f",
+      "name": "Normalizer Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\n// ----------------------\n// Weight every strength\n// ----------------------\n\nconst weights = {\n\nSEO:5,\nPerformance:5,\nAccessibility:5,\nSecurity:5,\nConversion:4,\nBranding:4,\nContent:4,\nTrust:4,\nUX:3,\nTech:3\n\n};\n\n// ----------------------\n// Build master strength list\n// ----------------------\n\nconst strengths = [];\n\n[\n\"seo\",\n\"ux\",\n\"conversion\",\n\"tech\",\n\"branding\",\n\"content\",\n\"performance\",\n\"accessibility\",\n\"security\",\n\"trust\"\n\n].forEach(section=>{\n\n    if(!audit[section]) return;\n\n    (audit[section].strengths || []).forEach(item=>{\n\n        strengths.push({\n\n            section,\n\n            strength:item,\n\n            score:weights[\n                section.charAt(0).toUpperCase() +\n                section.slice(1)\n            ] || 1\n\n        });\n\n    });\n\n});\n\n// ----------------------\n// Merge duplicates\n// ----------------------\n\nconst unique = [];\n\nconst seen = new Set();\n\nstrengths.forEach(s=>{\n\n    const key = s.strength.toLowerCase();\n\n    if(!seen.has(key)){\n\n        seen.add(key);\n\n        unique.push(s);\n\n    }\n\n});\n\n// ----------------------\n// Sort by importance\n// ----------------------\n\nunique.sort((a,b)=>b.score-a.score);\n\n// ----------------------\n// Keep only the best\n// ----------------------\n\nconst topStrengths = unique.slice(0,5);\n\n// ----------------------\n// Summary\n// ----------------------\n\nconst strengthSummary = {\n\ntotal:unique.length,\n\ntop:topStrengths\n\n};\n\n// ----------------------\n// Return\n// ----------------------\n\nreturn [{\n\njson:{\n\n...audit,\n\nstrengthSummary,\n\ntopStrengths\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        64
+      ],
+      "id": "af9c0d67-37fd-47a1-90f3-5e595594971c",
+      "name": "Strength Ranking Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst impactWeight = {\n    High: 3,\n    Medium: 2,\n    Low: 1\n};\n\nconst effortWeight = {\n    Easy: 3,\n    Medium: 2,\n    Hard: 1,\n    Unknown: 1\n};\n\nconst opportunities = (audit.recommendations || []).map(rec => {\n\n    const impact = impactWeight[rec.impact] || 1;\n    const effort = effortWeight[rec.effort] || 1;\n    const gain = rec.expectedGain || 1;\n\n    // ROI score\n    const score = (impact * 3) + gain + effort;\n\n    return {\n        ...rec,\n        roiScore: score\n    };\n\n});\n\n// Remove duplicates\nconst seen = new Set();\n\nconst unique = opportunities.filter(item => {\n\n    if(seen.has(item.issue)) return false;\n\n    seen.add(item.issue);\n\n    return true;\n\n});\n\n// Highest ROI first\nunique.sort((a,b)=>b.roiScore-a.roiScore);\n\n// Top fixes\nconst top5 = unique.slice(0,5);\n\n// Medium priority\nconst medium = unique.slice(5,10);\n\n// Remaining\nconst backlog = unique.slice(10);\n\nreturn [{\n\njson:{\n\n...audit,\n\nroadmap:{\n\ntopPriority:top5,\n\nmediumPriority:medium,\n\nbacklog\n\n}\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        64
+      ],
+      "id": "191ca62e-69cd-482e-a2ae-bbf3d978ff15",
+      "name": "Opportunity Ranking Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst seen = new Set();\n\nconst recommendations = [];\n\n(audit.recommendations || []).forEach(rec => {\n\n    const key = rec.issue.toLowerCase();\n\n    if (!seen.has(key)) {\n\n        seen.add(key);\n\n        recommendations.push(rec);\n\n    }\n\n});\n\nconst summary = {\n    before: audit.recommendations?.length || 0,\n    after: recommendations.length,\n    removed: (audit.recommendations?.length || 0) - recommendations.length\n};\n\nreturn [{\n    json: {\n        ...audit,\n        recommendations,\n        recommendationSummary: {\n            ...(audit.recommendationSummary || {}),\n            total: recommendations.length\n        },\n        deduplication: summary\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        64
+      ],
+      "id": "39bb62e5-ee93-4bb7-b7a4-aba23ff7fed7",
+      "name": "Deduplication Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst current = audit.overall || 0;\n\nconst roadmap = audit.roadmap90 || {};\n\nconst immediate = roadmap.immediate?.scoreGain || 0;\nconst shortTerm = roadmap.shortTerm?.scoreGain || 0;\nconst longTerm = roadmap.longTerm?.scoreGain || 0;\n\nfunction projected(score, gain){\n\n    // diminishing returns\n\n    return Math.min(\n        100,\n        Math.round(score + (gain * (100-score)/100))\n    );\n\n}\n\nconst projections = {\n\n    current,\n\n    afterImmediate:\n        projected(current, immediate),\n\n    afterShortTerm:\n        projected(\n            projected(current, immediate),\n            shortTerm\n        ),\n\n    afterLongTerm:\n        projected(\n            projected(\n                projected(current, immediate),\n                shortTerm\n            ),\n            longTerm\n        )\n\n};\n\nreturn [{\n\njson:{\n\n...audit,\n\nscoreProjection: projections\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        64
+      ],
+      "id": "a3e18b6b-606b-40c6-8122-f81c537f80fd",
+      "name": "Score Projection Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst recommendations = audit.recommendations || [];\n\nconst critical =\nrecommendations.filter(r=>r.priority===\"Critical\").length;\n\nconst high =\nrecommendations.filter(r=>r.priority===\"High\").length;\n\nconst medium =\nrecommendations.filter(r=>r.priority===\"Medium\").length;\n\nconst low =\nrecommendations.filter(r=>r.priority===\"Low\").length;\n\nconst estimatedTime =\naudit.roadmapSummary?.totalImplementationMinutes || 0;\n\nconst kpis={\n\nwebsite:\naudit.branding?.brandName || \"Unknown\",\n\noverallScore:\naudit.overall,\n\ngrade:\naudit.grade,\n\nstatus:\naudit.status,\n\nestimatedPotential:\naudit.scoreProjection?.afterLongTerm ||\naudit.overall,\n\ncriticalIssues:critical,\n\nhighPriority:high,\n\nmediumPriority:medium,\n\nlowPriority:low,\n\nquickWins:\naudit.quickWins?.length || 0,\n\nestimatedImplementationMinutes:\nestimatedTime,\n\nestimatedImplementationHours:\n(estimatedTime/60).toFixed(1)\n\n};\n\nreturn [{\n\njson:{\n\n...audit,\n\nexecutiveKPIs:kpis\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4000,
+        64
+      ],
+      "id": "57d8e6f0-18fa-4d73-b1d6-8176233441b5",
+      "name": "Executive KPI Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst context = {\n\nwebsite: audit.branding?.brandName,\n\nexecutive: audit.executiveKPIs,\n\nstrengths:\n\n[\n...(audit.seo?.strengths || []),\n...(audit.ux?.strengths || []),\n...(audit.performance?.strengths || [])\n].slice(0,10),\n\nweaknesses:\n\n(audit.recommendations || [])\n.slice(0,10)\n.map(r=>({\n\nissue:r.issue,\n\npriority:r.priority,\n\nbusiness:r.business\n\n})),\n\nroadmap:audit.roadmap90,\n\nbenchmark:audit.benchmark,\n\nbusinessImpact:\n\n(audit.businessImpact || []).slice(0,10),\n\nrisk:\n\naudit.riskSummary,\n\nmaturity:\n\naudit.maturity,\n\ntopOpportunities:\n\naudit.opportunitySummary?.topFive || [],\n\nprojectedScores:\n\naudit.scoreProjection\n\n};\n\nreturn [{\n\njson:{\n\n...audit,\n\naiContext:context\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4432,
+        64
+      ],
+      "id": "df066f0e-57e7-4d49-b5a2-c0fa187d6c75",
+      "name": "AI Context Builder"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nfunction top(list = [], count = 5) {\n    return list.slice(0, count);\n}\n\nconst report = {\n\n    reportMeta: {\n\n        generatedAt: new Date().toISOString(),\n\n        website:\n            audit.branding?.brandName || \"Unknown Website\",\n\n        overallScore:\n            audit.overall,\n\n        grade:\n            audit.grade,\n\n        status:\n            audit.status\n\n    },\n\n    executiveSummary: {\n\n        score:\n            audit.overall,\n\n        projectedScore:\n            audit.scoreProjection?.afterLongTerm ??\n            audit.overall,\n\n        maturity:\n            audit.maturity?.stage,\n\n        benchmark:\n            audit.benchmark,\n\n        estimatedPotential:\n            audit.executiveKPIs?.estimatedPotential\n\n    },\n\n    strengths: {\n\n        seo:\n            audit.seo?.strengths || [],\n\n        ux:\n            audit.ux?.strengths || [],\n\n        conversion:\n            audit.conversion?.strengths || [],\n\n        performance:\n            audit.performance?.strengths || [],\n\n        branding:\n            audit.branding?.strengths || []\n\n    },\n\n    priorityIssues:\n        top(audit.priorityFixes,10),\n\n    quickWins:\n        top(audit.quickWins,10),\n\n    recommendations:\n        top(audit.recommendations,20),\n\n    roadmap:\n        audit.roadmap90,\n\n    businessImpact:\n        audit.businessImpact,\n\n    opportunities:\n        audit.opportunitySummary,\n\n    risks:\n        audit.riskSummary,\n\n    benchmark:\n        audit.benchmark,\n\n    projectedScores:\n        audit.scoreProjection,\n\n    dashboard:\n        audit.executiveDashboard,\n\n    kpis:\n        audit.executiveKPIs\n\n};\n\nreturn [{\n\njson:{\n\n...audit,\n\nreport\n\n}\n\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4640,
+        64
+      ],
+      "id": "dcc664fb-f3f5-4040-a40a-ffd62a5ca9bb",
+      "name": "Report Formatter Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst report = audit.report || {};\n\nconst assets = {\n\n    hero: {\n        website: audit.branding?.brandName || \"Unknown Website\",\n        overallScore: audit.overall,\n        grade: audit.grade,\n        status: audit.status,\n        projectedScore:\n            audit.scoreProjection?.afterLongTerm || audit.overall\n    },\n\n    scoreCards: [\n        {\n            title: \"Overall Score\",\n            value: audit.overall,\n            suffix: \"/100\"\n        },\n        {\n            title: \"Grade\",\n            value: audit.grade\n        },\n        {\n            title: \"Projected Score\",\n            value:\n                audit.scoreProjection?.afterLongTerm ||\n                audit.overall\n        },\n        {\n            title: \"Quick Wins\",\n            value:\n                audit.quickWins?.length || 0\n        },\n        {\n            title: \"High Priority\",\n            value:\n                audit.recommendationStats?.high || 0\n        }\n    ],\n\n    radarChart: [\n        {name:\"SEO\",value:audit.seo?.score||0},\n        {name:\"UX\",value:audit.ux?.score||0},\n        {name:\"Conversion\",value:audit.conversion?.score||0},\n        {name:\"Performance\",value:audit.performance?.score||0},\n        {name:\"Branding\",value:audit.branding?.score||0},\n        {name:\"Security\",value:audit.security?.score||0}\n    ],\n\n    barChart: [\n        {\n            label:\"Current\",\n            score:audit.overall\n        },\n        {\n            label:\"Projected\",\n            score:\n                audit.scoreProjection?.afterLongTerm ||\n                audit.overall\n        }\n    ],\n\n    strengths:\n\n        report.strengths ||\n\n        {},\n\n    weaknesses:\n\n        report.priorityIssues ||\n\n        [],\n\n    roadmap:\n\n        report.roadmap ||\n\n        {},\n\n    benchmark:\n\n        report.benchmark ||\n\n        {},\n\n    risks:\n\n        report.risks ||\n\n        {},\n\n    opportunities:\n\n        report.opportunities ||\n\n        {},\n\n    businessImpact:\n\n        report.businessImpact ||\n\n        [],\n\n    executiveSummary:\n\n        report.executiveSummary ||\n\n        {},\n\n    kpis:\n\n        audit.executiveKPIs ||\n\n        {},\n\n    dashboard:\n\n        audit.executiveDashboard ||\n\n        {}\n\n};\n\nreturn [{\njson:{\n...audit,\nassets\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4848,
+        64
+      ],
+      "id": "2f6a09de-6e3d-4ba2-a306-e3c8f51eb902",
+      "name": "Asset Builder"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Workflow Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "SEO Audit Node",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "UX Audit Node",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Conversion Audit Node",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Technical Audit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Accessibility Audit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Performance Audit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Trust Audit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Branding Audit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Content Audit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Security Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare URLs": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Config": {
+      "main": [
+        [
+          {
+            "node": "Load Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Leads": {
+      "main": [
+        [
+          {
+            "node": "Prepare URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SEO Audit Node": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UX Audit Node": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Conversion Audit Node": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Overall Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Overall Audit": {
+      "main": [
+        [
+          {
+            "node": "Recommendation Engine Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accessibility Audit": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Performance Audit": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "Trust Audit": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 6
+          }
+        ]
+      ]
+    },
+    "Branding Audit": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 7
+          }
+        ]
+      ]
+    },
+    "Recommendation Engine Code": {
+      "main": [
+        [
+          {
+            "node": "Deduplication Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Priority Engine": {
+      "main": [
+        [
+          {
+            "node": "Business Impact Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Business Impact Engine": {
+      "main": [
+        [
+          {
+            "node": "Benchmark Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Technical Audit": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Content Audit": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 8
+          }
+        ]
+      ]
+    },
+    "Security Audit": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 9
+          }
+        ]
+      ]
+    },
+    "Benchmark Engine": {
+      "main": [
+        [
+          {
+            "node": "Opportunity Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Opportunity Engine": {
+      "main": [
+        [
+          {
+            "node": "Risk Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Maturity Engine": {
+      "main": [
+        [
+          {
+            "node": "Executive KPI Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Roadmap Engine": {
+      "main": [
+        [
+          {
+            "node": "Score Projection Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executive Dashboard": {
+      "main": [
+        [
+          {
+            "node": "AI Context Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Risk Engine": {
+      "main": [
+        [
+          {
+            "node": "Maturity Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizer Engine": {
+      "main": [
+        [
+          {
+            "node": "Strength Ranking Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Strength Ranking Engine": {
+      "main": [
+        [
+          {
+            "node": "Opportunity Ranking Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Opportunity Ranking Engine": {
+      "main": [
+        [
+          {
+            "node": "Roadmap Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplication Engine": {
+      "main": [
+        [
+          {
+            "node": "Normalizer Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Projection Engine": {
+      "main": [
+        [
+          {
+            "node": "Priority Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executive KPI Engine": {
+      "main": [
+        [
+          {
+            "node": "Executive Dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Context Builder": {
+      "main": [
+        [
+          {
+            "node": "Report Formatter Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Formatter Engine": {
+      "main": [
+        [
+          {
+            "node": "Asset Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Asset Builder": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "dc944682-8931-45e8-a1c2-d2231eeb269d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "de0269e4b968c7d3ae2712a15271ad59e366290ce48cd9a880360e033464c575"
+  },
+  "nodeGroups": [],
+  "id": "loKJVYBGYd27UKvj",
+  "tags": []
+}
